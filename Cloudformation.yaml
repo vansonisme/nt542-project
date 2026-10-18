@@ -1,0 +1,201 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  One VPC, one public subnet, two Apache worker EC2 instances, and one
+  Apache reverse-proxy/load-balancer EC2 instance.
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+    Description: EC2 instance type for all three virtual machines.
+
+  AmazonLinuxAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: Latest Amazon Linux 2023 x86-64 AMI from the public SSM parameter.
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.20.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: apache-3vm-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: apache-3vm-igw
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.20.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: apache-3vm-public-subnet
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: apache-3vm-public-route-table
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow public HTTP traffic to the load-balancer VM
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: apache-3vm-lb-sg
+
+  WorkerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP traffic only from the load-balancer VM
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: apache-3vm-worker-sg
+
+  Worker1:
+    Type: AWS::EC2::Instance
+    DependsOn: PublicRoute
+    Properties:
+      ImageId: !Ref AmazonLinuxAmi
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref WorkerSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          dnf install -y httpd
+          cat > /var/www/html/index.html <<'HTML'
+          <!doctype html>
+          <html><body><h1>Worker 1</h1><p>Apache is running.</p></body></html>
+          HTML
+          systemctl enable --now httpd
+      Tags:
+        - Key: Name
+          Value: apache-worker-1
+
+  Worker2:
+    Type: AWS::EC2::Instance
+    DependsOn: PublicRoute
+    Properties:
+      ImageId: !Ref AmazonLinuxAmi
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref WorkerSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          dnf install -y httpd
+          cat > /var/www/html/index.html <<'HTML'
+          <!doctype html>
+          <html><body><h1>Worker 2</h1><p>Apache is running.</p></body></html>
+          HTML
+          systemctl enable --now httpd
+      Tags:
+        - Key: Name
+          Value: apache-worker-2
+
+  LoadBalancerInstance:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - PublicRoute
+      - Worker1
+      - Worker2
+    Properties:
+      ImageId: !Ref AmazonLinuxAmi
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref LoadBalancerSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          dnf install -y httpd
+          cat > /etc/httpd/conf.d/load-balancer.conf <<'CONFIG'
+          <VirtualHost *:80>
+            ProxyRequests Off
+            <Proxy "balancer://workers">
+              BalancerMember "http://${Worker1.PrivateIp}:80"
+              BalancerMember "http://${Worker2.PrivateIp}:80"
+              ProxySet lbmethod=byrequests
+            </Proxy>
+            ProxyPass "/" "balancer://workers/"
+            ProxyPassReverse "/" "balancer://workers/"
+          </VirtualHost>
+          CONFIG
+          apachectl configtest
+          systemctl enable --now httpd
+      Tags:
+        - Key: Name
+          Value: apache-load-balancer
+
+Outputs:
+  WebsiteURL:
+    Description: Open this URL after waiting about two minutes for Apache installation.
+    Value: !Sub "http://${LoadBalancerInstance.PublicDnsName}"
+
+  LoadBalancerInstanceId:
+    Description: EC2 instance acting as the Apache load balancer.
+    Value: !Ref LoadBalancerInstance
+
+  Worker1InstanceId:
+    Value: !Ref Worker1
+
+  Worker2InstanceId:
+    Value: !Ref Worker2
+
+  VpcId:
+    Value: !Ref VPC
+
+  PublicSubnetId:
+    Value: !Ref PublicSubnet
