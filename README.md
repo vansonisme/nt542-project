@@ -18,7 +18,7 @@ The examples use AWS Region `us-east-1` and stack name `nt542-project`.
 - The private key file for that key pair, for example `NT542v2.pem`.
 - `Cloudformation.yaml` downloaded or cloned to your computer.
 
-> `KeyName` is the AWS key-pair name (`NT542v2`), not the local filename (`NT542v2.pem`). NAT Gateway and EC2 resources incur AWS charges.
+> `KeyName` is the AWS key-pair name (`NT542v2`), not the local filename (`NT542v2.pem`). 
 
 ## Option 1: Deploy with the AWS Console
 
