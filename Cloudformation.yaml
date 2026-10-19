@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  One VPC, one public subnet, two Apache worker EC2 instances, and one
-  Apache reverse-proxy/load-balancer EC2 instance.
+  One VPC, one public subnet, two private subnets, two Apache worker EC2
+  instances, one Apache reverse-proxy/load-balancer EC2 instance, and one
+  NAT Gateway shared by the private subnets.
 
 Parameters:
   InstanceType:
@@ -16,6 +17,14 @@ Parameters:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
     Description: Latest Amazon Linux 2023 x86-64 AMI from the public SSM parameter.
+
+  SSHLocation:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR block allowed to connect to the virtual machines over SSH.
+    AllowedPattern: >-
+      (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    ConstraintDescription: Must be a valid IPv4 CIDR range such as 203.0.113.10/32.
 
 Resources:
   VPC:
@@ -45,11 +54,34 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs ""]
       CidrBlock: 10.20.1.0/24
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
           Value: apache-3vm-public-subnet
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.20.2.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: apache-3vm-private-subnet-1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.20.3.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: apache-3vm-private-subnet-2
 
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
@@ -73,16 +105,68 @@ Resources:
       SubnetId: !Ref PublicSubnet
       RouteTableId: !Ref PublicRouteTable
 
+  NatGatewayElasticIp:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: apache-3vm-nat-eip
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    DependsOn:
+      - PublicRoute
+      - PublicSubnetRouteTableAssociation
+    Properties:
+      AllocationId: !GetAtt NatGatewayElasticIp.AllocationId
+      SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: apache-3vm-nat-gateway
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: apache-3vm-private-route-table
+
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
   LoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow public HTTP traffic to the load-balancer VM
+      GroupDescription: Allow public HTTP and permitted SSH traffic to the load-balancer VM
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
       Tags:
         - Key: Name
           Value: apache-3vm-lb-sg
@@ -90,24 +174,30 @@ Resources:
   WorkerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow HTTP traffic only from the load-balancer VM
+      GroupDescription: Allow HTTP from the load balancer and permitted SSH traffic
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
       Tags:
         - Key: Name
           Value: apache-3vm-worker-sg
 
   Worker1:
     Type: AWS::EC2::Instance
-    DependsOn: PublicRoute
+    DependsOn:
+      - PrivateDefaultRoute
+      - PrivateSubnet1RouteTableAssociation
     Properties:
       ImageId: !Ref AmazonLinuxAmi
       InstanceType: !Ref InstanceType
-      SubnetId: !Ref PublicSubnet
+      SubnetId: !Ref PrivateSubnet1
       SecurityGroupIds:
         - !Ref WorkerSecurityGroup
       UserData:
@@ -125,11 +215,13 @@ Resources:
 
   Worker2:
     Type: AWS::EC2::Instance
-    DependsOn: PublicRoute
+    DependsOn:
+      - PrivateDefaultRoute
+      - PrivateSubnet2RouteTableAssociation
     Properties:
       ImageId: !Ref AmazonLinuxAmi
       InstanceType: !Ref InstanceType
-      SubnetId: !Ref PublicSubnet
+      SubnetId: !Ref PrivateSubnet2
       SecurityGroupIds:
         - !Ref WorkerSecurityGroup
       UserData:
@@ -149,6 +241,7 @@ Resources:
     Type: AWS::EC2::Instance
     DependsOn:
       - PublicRoute
+      - PublicSubnetRouteTableAssociation
       - Worker1
       - Worker2
     Properties:
@@ -199,3 +292,12 @@ Outputs:
 
   PublicSubnetId:
     Value: !Ref PublicSubnet
+
+  PrivateSubnet1Id:
+    Value: !Ref PrivateSubnet1
+
+  PrivateSubnet2Id:
+    Value: !Ref PrivateSubnet2
+
+  NatGatewayId:
+    Value: !Ref NatGateway
