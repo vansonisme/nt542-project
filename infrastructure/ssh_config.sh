@@ -32,19 +32,19 @@ cat << EOF > ~/.ssh/config
 Host loadbalancer
     HostName $LB_IP
     User ec2-user
-    IdentityFile ~/nt542/project/4444.pem
+    IdentityFile $KEY_PATH
 
 Host worker1
     HostName 10.0.2.10
     User ec2-user
     ProxyJump loadbalancer
-    IdentityFile ~/nt542/project/4444.pem
+    IdentityFile $KEY_PATH
 
 Host worker2
     HostName 10.0.3.10
     User ec2-user
     ProxyJump loadbalancer
-    IdentityFile ~/nt542/project/4444.pem
+    IdentityFile $KEY_PATH
 EOF
 
 chmod 600 ~/.ssh/config
