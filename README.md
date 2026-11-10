@@ -67,10 +67,10 @@ Ngoài ra, cần chuẩn bị:
 
 ### Bước 1. Clone project từ GitHub
 
-Clone nhánh `infrastructure` và di chuyển vào thư mục project:
+Clone nhánh `main` và di chuyển vào thư mục project:
 
 ```bash
-git clone -b infrastructure https://github.com/vansonisme/nt542-project.git && cd nt542-project
+git clone -b main https://github.com/vansonisme/nt542-project.git && cd nt542-project
 ```
 
 ### Bước 2. Cấu hình AWS Credentials
