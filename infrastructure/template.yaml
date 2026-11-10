@@ -4,7 +4,12 @@ Description: >-
   instances, one Apache reverse-proxy/load-balancer EC2 instance, and one
   NAT Gateway shared by the private subnets.
 
+# =====================================================================
+# PHẦN 1: THAM SỐ (Parameters)
+# Các giá trị có thể thay đổi khi tạo stack mà không cần sửa template
+# =====================================================================
 Parameters:
+  # --- Loại máy ảo EC2 dùng chung cho cả 3 máy ---
   InstanceType:
     Type: String
     Default: t3.micro
@@ -13,35 +18,44 @@ Parameters:
       - t3.micro
     Description: EC2 instance type for all three virtual machines.
 
+  # --- Hệ điều hành: tự lấy AMI Amazon Linux 2023 mới nhất qua SSM ---
   AmazonLinuxAmi:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
     Description: Latest Amazon Linux 2023 x86-64 AMI from the public SSM parameter.
 
+  # --- Key pair dùng để SSH vào máy (phải tồn tại sẵn trong region) ---
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
-    Default: NT542v2 # Change to your key
+    Default: 4444 # Change to your key
     Description: Name of an existing EC2 key pair.
 
+  # --- Dải IP được phép SSH vào máy Load balancer (nên đặt là IP của bạn, dạng x.x.x.x/32) ---
   SSHLocation:
     Type: String
     Default: 0.0.0.0/0
-    Description: CIDR block allowed to connect to the virtual machines over SSH.
+    Description: CIDR block allowed to connect to the load-balancer VM over SSH.
     AllowedPattern: >-
       (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
     ConstraintDescription: Must be a valid IPv4 CIDR range.
 
 Resources:
+  # =====================================================================
+  # PHẦN 2: MẠNG - VPC VÀ INTERNET GATEWAY
+  # VPC là mạng riêng ảo chứa toàn bộ hạ tầng; Internet Gateway cho phép ra/vào Internet
+  # =====================================================================
+  # --- VPC: mạng riêng ảo 10.0.0.0/16 ---
   VPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: 10.20.0.0/16
+      CidrBlock: 10.0.0.0/16
       EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:
         - Key: Name
           Value: apache-3vm-vpc
 
+  # --- Internet Gateway: cổng kết nối VPC với Internet ---
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
@@ -49,45 +63,58 @@ Resources:
         - Key: Name
           Value: apache-3vm-igw
 
+  # --- Gắn Internet Gateway vào VPC ---
   InternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
       VpcId: !Ref VPC
       InternetGatewayId: !Ref InternetGateway
 
+  # =====================================================================
+  # PHẦN 3: SUBNET
+  # 1 public subnet (đặt Load balancer, NAT Gateway) và 2 private subnet (đặt web server)
+  # =====================================================================
+  # --- Public subnet: máy ở đây tự nhận IP public ---
   PublicSubnet:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
       AvailabilityZone: !Select [0, !GetAZs ""]
-      CidrBlock: 10.20.1.0/24
+      CidrBlock: 10.0.1.0/24
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
           Value: apache-3vm-public-subnet
 
+  # --- Private subnet 1 (AZ thứ nhất): đặt Web server 1, không có IP public ---
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
       AvailabilityZone: !Select [0, !GetAZs ""]
-      CidrBlock: 10.20.2.0/24
+      CidrBlock: 10.0.2.0/24
       MapPublicIpOnLaunch: false
       Tags:
         - Key: Name
           Value: apache-3vm-private-subnet-1
 
+  # --- Private subnet 2 (AZ thứ hai): đặt Web server 2, không có IP public ---
   PrivateSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
       AvailabilityZone: !Select [1, !GetAZs ""]
-      CidrBlock: 10.20.3.0/24
+      CidrBlock: 10.0.3.0/24
       MapPublicIpOnLaunch: false
       Tags:
         - Key: Name
           Value: apache-3vm-private-subnet-2
 
+  # =====================================================================
+  # PHẦN 4: ĐỊNH TUYẾN CHO PUBLIC SUBNET
+  # Public subnet đi ra Internet trực tiếp qua Internet Gateway
+  # =====================================================================
+  # --- Bảng định tuyến của public subnet ---
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -96,6 +123,7 @@ Resources:
         - Key: Name
           Value: apache-3vm-public-route-table
 
+  # --- Mọi lưu lượng ra ngoài (0.0.0.0/0) đi qua Internet Gateway ---
   PublicRoute:
     Type: AWS::EC2::Route
     DependsOn: InternetGatewayAttachment
@@ -104,12 +132,18 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
+  # --- Gán bảng định tuyến cho public subnet ---
   PublicSubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnet
       RouteTableId: !Ref PublicRouteTable
 
+  # =====================================================================
+  # PHẦN 5: NAT GATEWAY VÀ ĐỊNH TUYẾN CHO PRIVATE SUBNET
+  # Web server ở private subnet đi ra Internet (để cài httpd) qua NAT Gateway
+  # =====================================================================
+  # --- Elastic IP (IP public cố định) dành cho NAT Gateway ---
   NatGatewayElasticIp:
     Type: AWS::EC2::EIP
     DependsOn: InternetGatewayAttachment
@@ -119,6 +153,7 @@ Resources:
         - Key: Name
           Value: apache-3vm-nat-eip
 
+  # --- NAT Gateway: đặt ở public subnet, cho phép máy private chỉ đi ra, không cho vào ---
   NatGateway:
     Type: AWS::EC2::NatGateway
     DependsOn:
@@ -131,6 +166,7 @@ Resources:
         - Key: Name
           Value: apache-3vm-nat-gateway
 
+  # --- Bảng định tuyến dùng chung cho 2 private subnet ---
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -139,6 +175,7 @@ Resources:
         - Key: Name
           Value: apache-3vm-private-route-table
 
+  # --- Mọi lưu lượng ra ngoài của private subnet đi qua NAT Gateway ---
   PrivateDefaultRoute:
     Type: AWS::EC2::Route
     Properties:
@@ -146,28 +183,42 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref NatGateway
 
+  # --- Gán bảng định tuyến cho private subnet 1 ---
   PrivateSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PrivateSubnet1
       RouteTableId: !Ref PrivateRouteTable
 
+  # --- Gán bảng định tuyến cho private subnet 2 ---
   PrivateSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PrivateSubnet2
       RouteTableId: !Ref PrivateRouteTable
 
+  # =====================================================================
+  # PHẦN 6: SECURITY GROUP (tường lửa của AWS)
+  # Quy định cổng nào được mở và cho ai truy cập
+  # =====================================================================
+  # --- Security Group của Load balancer: HTTP/HTTPS từ Internet, SSH từ SSHLocation ---
   LoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow public HTTP and permitted SSH traffic to the load-balancer VM
+      GroupDescription: Allow public HTTP/HTTPS and permitted SSH traffic to the load-balancer VM
       VpcId: !Ref VPC
       SecurityGroupIngress:
+        # Cổng 80: người dùng truy cập website bằng HTTP
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
+        # Cổng 443: người dùng truy cập website bằng HTTPS
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        # Cổng 22: SSH quản trị và Ansible kết nối từ máy local
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
@@ -176,24 +227,32 @@ Resources:
         - Key: Name
           Value: apache-3vm-lb-sg
 
+  # --- Security Group của Web server: chỉ nhận HTTP và SSH từ Load balancer ---
   WorkerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow HTTP from the load balancer and permitted SSH traffic
+      GroupDescription: Allow HTTP and SSH only from the load-balancer VM
       VpcId: !Ref VPC
       SecurityGroupIngress:
+        # Cổng 80: chỉ Load balancer được chuyển tiếp request đến
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+        # Cổng 22: chỉ SSH qua Load balancer (dùng làm máy trung gian cho Ansible)
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
-          CidrIp: !Ref SSHLocation
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
       Tags:
         - Key: Name
           Value: apache-3vm-worker-sg
 
+  # =====================================================================
+  # PHẦN 7: MÁY CHỦ WEB (Web server / Worker)
+  # 2 máy ở 2 private subnet, cài Apache và tạo trang index để nhận biết máy nào phản hồi
+  # =====================================================================
+  # --- Web server 1 (private subnet 1) ---
   Worker1:
     Type: AWS::EC2::Instance
     DependsOn:
@@ -204,6 +263,7 @@ Resources:
       InstanceType: !Ref InstanceType
       KeyName: !Ref KeyName
       SubnetId: !Ref PrivateSubnet1
+      PrivateIpAddress: 10.0.2.10 
       SecurityGroupIds:
         - !Ref WorkerSecurityGroup
       UserData:
@@ -219,6 +279,7 @@ Resources:
         - Key: Name
           Value: apache-worker-1
 
+  # --- Web server 2 (private subnet 2) ---
   Worker2:
     Type: AWS::EC2::Instance
     DependsOn:
@@ -229,11 +290,13 @@ Resources:
       InstanceType: !Ref InstanceType
       KeyName: !Ref KeyName
       SubnetId: !Ref PrivateSubnet2
+      PrivateIpAddress: 10.0.3.10 
       SecurityGroupIds:
         - !Ref WorkerSecurityGroup
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
+          sleep 30
           dnf install -y httpd
           cat > /var/www/html/index.html <<'HTML'
           <!doctype html>
@@ -244,6 +307,10 @@ Resources:
         - Key: Name
           Value: apache-worker-2
 
+  # =====================================================================
+  # PHẦN 8: MÁY CÂN BẰNG TẢI (Load balancer)
+  # Apache làm reverse proxy, chia request cho 2 web server; đặt ở public subnet
+  # =====================================================================
   LoadBalancerInstance:
     Type: AWS::EC2::Instance
     DependsOn:
@@ -256,11 +323,13 @@ Resources:
       InstanceType: !Ref InstanceType
       KeyName: !Ref KeyName
       SubnetId: !Ref PublicSubnet
+      PrivateIpAddress: 10.0.1.10  
       SecurityGroupIds:
         - !Ref LoadBalancerSecurityGroup
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
+          sleep 30
           dnf install -y httpd
           cat > /etc/httpd/conf.d/load-balancer.conf <<'CONFIG'
           <VirtualHost *:80>
@@ -280,21 +349,44 @@ Resources:
         - Key: Name
           Value: apache-load-balancer
 
+# =====================================================================
+# PHẦN 9: ĐẦU RA (Outputs)
+# Thông tin hiển thị sau khi tạo stack xong
+# =====================================================================
 Outputs:
+  # --- Địa chỉ truy cập website qua Load balancer ---
   WebsiteURL:
     Description: Open this URL after waiting about two minutes for Apache installation.
     Value: !Sub "http://${LoadBalancerInstance.PublicDnsName}"
 
+  # --- ID của 3 máy ảo ---
   LoadBalancerInstanceId:
     Description: EC2 instance acting as the Apache load balancer.
     Value: !Ref LoadBalancerInstance
 
+    # --- Địa chỉ IP của 3 máy EC2 (dùng cho ~/.ssh/config và inventory Ansible) ---
+  LoadBalancerPublicIp:
+    Description: IP public của Load balancer (SSH từ máy local vào đây).
+    Value: !GetAtt LoadBalancerInstance.PublicIp
+
+  LoadBalancerPrivateIp:
+    Value: !GetAtt LoadBalancerInstance.PrivateIp
+
+  Worker1PrivateIp:
+    Description: IP private của Web server 1 (SSH qua Load balancer).
+    Value: !GetAtt Worker1.PrivateIp
+
+  Worker2PrivateIp:
+    Description: IP private của Web server 2 (SSH qua Load balancer).
+    Value: !GetAtt Worker2.PrivateIp
+      
   Worker1InstanceId:
     Value: !Ref Worker1
 
   Worker2InstanceId:
     Value: !Ref Worker2
 
+  # --- ID của các tài nguyên mạng ---
   VpcId:
     Value: !Ref VPC
 
