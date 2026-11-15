@@ -1,7 +1,11 @@
-
 ---
 - name: CIS Benchmarks Audit
-  hosts: "{{ target | default('all') }}"
+  hosts: >-
+    {{
+      (plan | dict2items | map(attribute='key') | join(','))
+      if plan is defined
+      else (target | default('all'))
+    }}
   become: true
   gather_facts: false
 
@@ -18,25 +22,39 @@
         | community.general.version_sort
       }}
 
+    requested_cis: >-
+      {{
+        (plan[inventory_hostname] | default([]) | map('string') | list)
+        if plan is defined
+        else ((cis | default('all') | string).split(',') | map('trim') | list)
+      }}
+
     cis_ids: >-
       {{
         all_cis
-        if (cis | default('all') | string) == 'all'
-        else ((cis | string).split(',') | map('trim') | list)
+        if ('all' in requested_cis)
+        else requested_cis
       }}
 
   pre_tasks:
+    - name: Lưu danh sách host của lượt chạy
+      ansible.builtin.set_fact:
+        run_hosts: "{{ ansible_play_hosts_all }}"
+      run_once: true
+      delegate_to: localhost
+      delegate_facts: true
+
     - name: Kiểm tra danh sách CIS
       ansible.builtin.assert:
         that:
           - all_cis | length > 0
+          - cis_ids | length > 0
           - cis_ids | difference(all_cis) | length == 0
         fail_msg: >-
-          Không tìm thấy script hoặc CIS không hợp lệ:
+          Host {{ inventory_hostname }}: không tìm thấy script hoặc CIS không hợp lệ:
           {{ cis_ids | difference(all_cis) }}.
           Hiện có: {{ all_cis }}
         quiet: true
-      run_once: true
 
   tasks:
     - name: Chạy các script CIS audit
@@ -64,7 +82,7 @@
           {{ '─' * 40 }}
           TỔNG KẾT: {{ pass_count }} PASS | {{ fail_count }} FAIL
       vars:
-        all_lines: "{{ audit_results.results | map(attribute='stdout_lines') | flatten }}"
+        all_lines: "{{ audit_results.results | map(attribute='stdout_lines', default=[]) | flatten }}"
         pass_count: "{{ all_lines | select('match', '^\\[PASS\\]') | list | length }}"
         fail_count: "{{ all_lines | select('match', '^\\[FAIL\\]') | list | length }}"
 
@@ -88,18 +106,9 @@
 
   vars:
     report_dir: "{{ playbook_dir | dirname }}/reports"
-
-    # Lấy đúng các host thuộc lượt audit đầu tiên.
-    target_hosts: "{{ hostvars['localhost']['audit_target_hosts'] }}"
+    run_hosts: "{{ hostvars['localhost']['run_hosts'] | default([]) }}"
 
   tasks:
-    - name: Lưu danh sách host đã chọn
-      ansible.builtin.set_fact:
-        audit_target_hosts: "{{ ansible_play_hosts_all }}"
-      run_once: true
-      delegate_to: localhost
-      delegate_facts: true
-
     - name: Tạo thư mục reports
       ansible.builtin.file:
         path: "{{ report_dir }}"
@@ -110,7 +119,7 @@
       ansible.builtin.copy:
         dest: "{{ report_dir }}/audit_{{ item }}.txt"
         content: "{{ hostvars[item].report_text }}"
-      loop: "{{ target_hosts }}"
+      loop: "{{ run_hosts }}"
       loop_control:
         label: "{{ item }}"
       when: hostvars[item].report_text is defined
@@ -120,7 +129,6 @@
         dest: "{{ report_dir }}/audit_report.csv"
         content: |
           server,check,status,message
-          {% for h in target_hosts if hostvars[h].csv_rows is defined and hostvars[h].csv_rows | trim | length > 0 %}
+          {% for h in run_hosts if hostvars[h].csv_rows is defined and hostvars[h].csv_rows | trim | length > 0 %}
           {{ hostvars[h].csv_rows | trim }}
           {% endfor %}
-
