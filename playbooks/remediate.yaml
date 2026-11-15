@@ -1,7 +1,11 @@
-
 ---
 - name: CIS Benchmarks Remediation
-  hosts: "{{ target | default('all') }}"
+  hosts: >-
+    {{
+      (plan | dict2items | map(attribute='key') | join(','))
+      if plan is defined
+      else (target | default('all'))
+    }}
   become: true
   gather_facts: false
 
@@ -18,25 +22,39 @@
         | community.general.version_sort
       }}
 
+    requested_cis: >-
+      {{
+        (plan[inventory_hostname] | default([]) | map('string') | list)
+        if plan is defined
+        else ((cis | default('all') | string).split(',') | map('trim') | list)
+      }}
+
     cis_ids: >-
       {{
         all_cis
-        if (cis | default('all') | string) == 'all'
-        else ((cis | string).split(',') | map('trim') | list)
+        if ('all' in requested_cis)
+        else requested_cis
       }}
 
   pre_tasks:
+    - name: Lưu danh sách host của lượt chạy
+      ansible.builtin.set_fact:
+        run_hosts: "{{ ansible_play_hosts_all }}"
+      run_once: true
+      delegate_to: localhost
+      delegate_facts: true
+
     - name: Kiểm tra danh sách CIS Remediation
       ansible.builtin.assert:
         that:
           - all_cis | length > 0
+          - cis_ids | length > 0
           - cis_ids | difference(all_cis) | length == 0
         fail_msg: >-
-          Không tìm thấy script remediation hoặc CIS không hợp lệ:
+          Host {{ inventory_hostname }}: không tìm thấy script remediation hoặc CIS không hợp lệ:
           {{ cis_ids | difference(all_cis) }}.
           Hiện có: {{ all_cis }}
         quiet: true
-      run_once: true
 
   tasks:
     - name: Chạy các script CIS Remediation
@@ -64,7 +82,7 @@
           {{ '─' * 40 }}
           TỔNG KẾT: {{ pass_count }} PASS | {{ remediated_count }} REMEDIATED | {{ fail_count }} FAIL
       vars:
-        all_lines: "{{ remediate_results.results | map(attribute='stdout_lines') | flatten }}"
+        all_lines: "{{ remediate_results.results | map(attribute='stdout_lines', default=[]) | flatten }}"
         pass_count: "{{ all_lines | select('match', '^\\[PASS\\]') | list | length }}"
         remediated_count: "{{ all_lines | select('match', '^\\[REMEDIATED\\]') | list | length }}"
         fail_count: "{{ all_lines | select('match', '^\\[FAIL\\]') | list | length }}"
@@ -89,6 +107,7 @@
 
   vars:
     report_dir: "{{ playbook_dir | dirname }}/reports"
+    run_hosts: "{{ hostvars['localhost']['run_hosts'] | default([]) }}"
 
   tasks:
     - name: Tạo thư mục reports
@@ -101,7 +120,7 @@
       ansible.builtin.copy:
         dest: "{{ report_dir }}/remediate_{{ item }}.txt"
         content: "{{ hostvars[item].report_text }}"
-      loop: "{{ groups['all'] }}"
+      loop: "{{ run_hosts }}"
       loop_control:
         label: "{{ item }}"
       when: hostvars[item].report_text is defined
@@ -111,7 +130,6 @@
         dest: "{{ report_dir }}/remediate_report.csv"
         content: |
           server,check,status,message
-          {% for h in groups['all'] if hostvars[h].csv_rows is defined and hostvars[h].csv_rows | trim | length > 0 %}
+          {% for h in run_hosts if hostvars[h].csv_rows is defined and hostvars[h].csv_rows | trim | length > 0 %}
           {{ hostvars[h].csv_rows | trim }}
           {% endfor %}
-
