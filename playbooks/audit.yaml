@@ -1,0 +1,126 @@
+
+---
+- name: CIS Benchmarks Audit
+  hosts: "{{ target | default('all') }}"
+  become: true
+  gather_facts: false
+
+  vars:
+    project_dir: "{{ playbook_dir | dirname }}"
+    audit_dir: "{{ project_dir }}/scripts/audit"
+
+    all_cis: >-
+      {{
+        query('fileglob', audit_dir ~ '/audit_*.sh')
+        | map('basename')
+        | map('regex_replace', '^audit_(.*)\.sh$', '\1')
+        | list
+        | community.general.version_sort
+      }}
+
+    cis_ids: >-
+      {{
+        all_cis
+        if (cis | default('all') | string) == 'all'
+        else ((cis | string).split(',') | map('trim') | list)
+      }}
+
+  pre_tasks:
+    - name: Kiểm tra danh sách CIS
+      ansible.builtin.assert:
+        that:
+          - all_cis | length > 0
+          - cis_ids | difference(all_cis) | length == 0
+        fail_msg: >-
+          Không tìm thấy script hoặc CIS không hợp lệ:
+          {{ cis_ids | difference(all_cis) }}.
+          Hiện có: {{ all_cis }}
+        quiet: true
+      run_once: true
+
+  tasks:
+    - name: Chạy các script CIS audit
+      ansible.builtin.script: "{{ audit_dir }}/audit_{{ item }}.sh"
+      args:
+        executable: /bin/bash
+      loop: "{{ cis_ids }}"
+      loop_control:
+        label: "CIS {{ item }}"
+      register: audit_results
+      changed_when: false
+      failed_when: false
+
+    - name: Tạo nội dung báo cáo Audit
+      ansible.builtin.set_fact:
+        report_text: |
+          ========== AUDIT REPORT - SERVER: {{ inventory_hostname }} ==========
+          {% for res in audit_results.results %}
+          {{ '─' * 40 }}
+          CIS Check: {{ res.item }}
+          {% for line in res.stdout_lines | default([]) %}
+            {{ line }}
+          {% endfor %}
+          {% endfor %}
+          {{ '─' * 40 }}
+          TỔNG KẾT: {{ pass_count }} PASS | {{ fail_count }} FAIL
+      vars:
+        all_lines: "{{ audit_results.results | map(attribute='stdout_lines') | flatten }}"
+        pass_count: "{{ all_lines | select('match', '^\\[PASS\\]') | list | length }}"
+        fail_count: "{{ all_lines | select('match', '^\\[FAIL\\]') | list | length }}"
+
+    - name: In báo cáo Audit
+      ansible.builtin.debug:
+        msg: "{{ report_text.rstrip().split('\n') }}"
+
+    - name: Tạo CSV rows
+      ansible.builtin.set_fact:
+        csv_rows: |
+          {% for res in audit_results.results %}
+          {% for line in res.stdout_lines | default([]) if line.startswith(('[PASS]', '[FAIL]')) %}
+          {{ inventory_hostname }},{{ res.item }},{{ line.split(']')[0] | replace('[', '') }},"{{ (line.split('] ', 1) | last) | replace('"', '""') }}"
+          {% endfor %}
+          {% endfor %}
+
+
+- name: Generate Audit Reports
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    report_dir: "{{ playbook_dir | dirname }}/reports"
+
+    # Lấy đúng các host thuộc lượt audit đầu tiên.
+    target_hosts: "{{ hostvars['localhost']['audit_target_hosts'] }}"
+
+  tasks:
+    - name: Lưu danh sách host đã chọn
+      ansible.builtin.set_fact:
+        audit_target_hosts: "{{ ansible_play_hosts_all }}"
+      run_once: true
+      delegate_to: localhost
+      delegate_facts: true
+
+    - name: Tạo thư mục reports
+      ansible.builtin.file:
+        path: "{{ report_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Lưu báo cáo riêng từng server
+      ansible.builtin.copy:
+        dest: "{{ report_dir }}/audit_{{ item }}.txt"
+        content: "{{ hostvars[item].report_text }}"
+      loop: "{{ target_hosts }}"
+      loop_control:
+        label: "{{ item }}"
+      when: hostvars[item].report_text is defined
+
+    - name: Xuất CSV tổng hợp Audit
+      ansible.builtin.copy:
+        dest: "{{ report_dir }}/audit_report.csv"
+        content: |
+          server,check,status,message
+          {% for h in target_hosts if hostvars[h].csv_rows is defined and hostvars[h].csv_rows | trim | length > 0 %}
+          {{ hostvars[h].csv_rows | trim }}
+          {% endfor %}
+
