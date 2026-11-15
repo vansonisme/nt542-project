@@ -34,13 +34,13 @@ Host loadbalancer
     User ec2-user
     IdentityFile $KEY_PATH
 
-Host worker1
+Host webserver1
     HostName 10.0.2.10
     User ec2-user
     ProxyJump loadbalancer
     IdentityFile $KEY_PATH
 
-Host worker2
+Host webserver2
     HostName 10.0.3.10
     User ec2-user
     ProxyJump loadbalancer
