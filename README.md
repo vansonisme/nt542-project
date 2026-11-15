@@ -140,15 +140,95 @@ Ghi chú:
 - Tên host dùng trong `target` là tên trong inventory (ví dụ `loadbalancer`, `webserver1`, `webserver2`); xem bằng `ansible all --list-hosts`.
 
 ## 8. Thêm CIS mới
-
-1. Tạo `scripts/audit/audit_<id>.sh` và `scripts/remediate/remediate_<id>.sh`.
-2. Mỗi script in **đúng một dòng trạng thái** bắt đầu bằng `[PASS]`, `[FAIL]` hoặc `[REMEDIATED]`, theo dạng:
-
-```text
-[PASS] <mô tả> (Current: X | Expected: Y)
+ 
+Playbook tự tìm script theo tên file (`audit_*.sh`, `remediate_*.sh`), nên thêm CIS mới chỉ cần **tạo 2 file script**, không phải sửa playbook.
+ 
+### 8.1 Các bước
+ 
+1. **Chọn id** theo đúng số mục trong benchmark, ví dụ `8.1`.
+2. **Tạo** `scripts/audit/audit_<id>.sh` (mẫu ở 8.3).
+3. **Tạo** `scripts/remediate/remediate_<id>.sh` (mẫu ở 8.4). Phần kiểm tra phải giống hệt file audit.
+4. **Chạy thử trực tiếp** trên một máy chủ (8.6).
+5. **Chạy thử qua Ansible** với `-e cis=<id>`.
+6. **Commit** cả hai file.
+### 8.2 Quy tắc bắt buộc
+ 
+Playbook đọc stdout của script để tạo tổng kết và CSV, nên script phải theo đúng hợp đồng sau:
+ 
+| Hạng mục | Quy tắc |
+|---|---|
+| Tên file | `audit_<id>.sh` và `remediate_<id>.sh`, **cùng `<id>`**, dùng dấu chấm (`8.1`), không khoảng trắng |
+| Nhãn của audit | `[PASS]` hoặc `[FAIL]` |
+| Nhãn của remediate | `[PASS]` (đã đạt sẵn, có chữ `already`), `[REMEDIATED]` (đạt sau khi sửa), `[FAIL]` |
+| Số dòng trạng thái | **Đúng 1 dòng** trên stdout, nhãn **đứng đầu dòng** |
+| Message | `[NHÃN] <mô tả> (Current: X \| Expected: Y)` |
+| Exit code | `0` cho PASS và REMEDIATED, `1` cho FAIL |
+| Dòng khác | Không in thêm gì ra stdout. Muốn debug thì in ra stderr: `echo "..." >&2` |
+| Quyền | Script chạy bằng root qua `become: true`, không cần tự kiểm tra root |
+| Tương tác | Không dùng lệnh hỏi nhập (`read`, `dnf install` không có `-y`) |
+| Đồng bộ | Hàm kiểm tra và điều kiện "đạt" giống hệt giữa audit và remediate |
+ 
+Nếu script in nhiều hơn một dòng trạng thái, mỗi dòng sẽ thành một dòng CSV riêng và làm sai phần TỔNG KẾT.
+ 
+### 8.3 Mẫu audit
+ 
+```bash
+#!/bin/bash
+# CIS <id> <tên control> (Automated|Manual)
+ 
+get_value() {
+  <lệnh lấy trạng thái hiện tại>
+}
+ 
+# (Tùy chọn) Tiền kiểm tra: đối tượng cần kiểm tra có tồn tại không
+if <đối tượng không tồn tại>; then
+  echo "[FAIL] <đối tượng> not found (Current: missing | Expected: <mong đợi>)"
+  exit 1
+fi
+ 
+RESULT=$(get_value)
+ 
+if [ "$RESULT" = "<giá trị mong đợi>" ]; then
+  echo "[PASS] <mô tả> (Current: $RESULT | Expected: <mong đợi>)"
+  exit 0
+else
+  echo "[FAIL] <mô tả> (Current: $RESULT | Expected: <mong đợi>)"
+  exit 1
+fi
 ```
-
-3. Exit code: `0` cho PASS và REMEDIATED, `1` cho FAIL.
-4. Không cần sửa playbook, vì playbook tự tìm file theo mẫu `audit_*.sh` và `remediate_*.sh`.
-
-Dòng trạng thái phải đứng đầu dòng; playbook dựa vào đó để tạo tổng kết và CSV.
+ 
+### 8.4 Mẫu remediate
+ 
+```bash
+#!/bin/bash
+# CIS <id> <tên control> (Automated|Manual) - Remediation
+ 
+<biến cấu hình: đường dẫn, giá trị cần đặt>
+ 
+get_value() {
+  <giống hệt file audit>
+}
+ 
+# (Tùy chọn) Tiền kiểm tra: giống hệt file audit
+ 
+RESULT=$(get_value)
+ 
+if [ "$RESULT" = "<giá trị mong đợi>" ]; then
+  echo "[PASS] <mô tả> already ... (Current: $RESULT | Expected: <mong đợi>)"
+  exit 0
+else
+  <lệnh sửa>
+  [systemctl restart httpd nếu có đổi cấu hình]
+ 
+  RESULT=$(get_value)
+  if [ "$RESULT" = "<giá trị mong đợi>" ]; then
+    echo "[REMEDIATED] <mô tả> (Current: $RESULT | Expected: <mong đợi>)"
+    exit 0
+  else
+    echo "[FAIL] <mô tả> (Current: $RESULT | Expected: <mong đợi>)"
+    exit 1
+  fi
+fi
+```
+ 
+Ý tưởng chính: **remediate = audit + sửa + audit lại**. Kết quả cuối do bước kiểm tra lại quyết định, không phải do lệnh sửa chạy thành công hay không.
