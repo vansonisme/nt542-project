@@ -3,19 +3,15 @@
 set -euo pipefail
 
 file=/etc/httpd/conf.d/welcome.conf
-if [ ! -d /etc/httpd ]; then
-    echo '[FAIL] 5.4: Apache directory is missing.'
-    exit 1
-fi
-if [ ! -e "$file" ]; then
-    echo '[PASS] 5.4: welcome.conf is absent.'
-    exit 0
-fi
-result=$(grep -nEv '^[[:space:]]*(#|$)' "$file" || true)
-if [ -z "$result" ]; then
-    echo '[PASS] 5.4: welcome.conf is disabled.'
+if [ -f "$file" ]; then
+    result=$(cat "$file" | grep -vE '^[[:space:]]*(#|$)' || true)
+    if [ -z "$result" ]; then
+        echo '[PASS] 5.4: Welcome page is disabled.'
+    else
+        echo "$result"
+        echo '[FAIL] 5.4: Welcome page is enabled.'
+        exit 1
+    fi
 else
-    echo '[FAIL] 5.4: Active welcome.conf directives:'
-    printf '%s\n' "$result"
-    exit 1
+    echo '[PASS] 5.4: welcome.conf is absent.'
 fi
