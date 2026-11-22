@@ -9,18 +9,17 @@ get_value() {
 RESULT=$(get_value)
 
 if [ "$RESULT" = "0" ]; then
-  echo "[PASS] CIS 3.5 - Apache files group ownership already compliant (Current: $RESULT | Expected: 0)"
+  echo "[PASS] Apache files group ownership already compliant (Current: $RESULT | Expected: 0)"
   exit 0
 else
-  echo "Remediating: changing group to root on $RESULT file(s)..." >&2
   find /etc/httpd -path /etc/httpd/htdocs -prune -o \! -group root -exec chgrp -h root {} +
 
   RESULT=$(get_value)
   if [ "$RESULT" = "0" ]; then
-    echo "[REMEDIATED] CIS 3.5 - Apache files group ownership (Current: $RESULT | Expected: 0)"
+    echo "[REMEDIATED] Apache files group ownership (Current: $RESULT | Expected: 0)"
     exit 0
   else
-    echo "[FAIL] CIS 3.5 - Apache files group ownership (Current: $RESULT | Expected: 0)"
+    echo "[FAIL] Apache files group ownership (Current: $RESULT | Expected: 0)"
     exit 1
   fi
 fi

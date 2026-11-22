@@ -13,33 +13,39 @@ get_value() {
 RESULT=$(get_value)
 
 if [ "$RESULT" = "loaded" ]; then
-  echo "[PASS] CIS 6.6 - ModSecurity module status already compliant (Current: $RESULT | Expected: loaded)"
+  echo "[PASS] ModSecurity module status already compliant (Current: $RESULT | Expected: loaded)"
   exit 0
 else
-  echo "Remediating: installing and enabling ModSecurity..." >&2
 
   # Install mod_security if not present
   if ! rpm -q mod_security &>/dev/null; then
-    echo "Installing mod_security package..." >&2
-    yum install -y mod_security >&2
+    if ! yum install -y mod_security >/dev/null 2>&1; then
+      echo "[FAIL] Failed to install mod_security (Current: not_installed | Expected: installed)"
+      exit 1
+    fi
   fi
 
   # Ensure LoadModule directive exists
   if ! httpd -M 2>/dev/null | grep -q security2_module; then
-    echo "Adding LoadModule for security2_module..." >&2
     local_conf=/etc/httpd/conf.modules.d/99-cis-modsecurity.conf
     printf '%s\n' 'LoadModule security2_module modules/mod_security2.so' > "$local_conf"
   fi
 
-  httpd -t 2>&2
-  systemctl restart httpd
+  if ! httpd -t >/dev/null 2>&1; then
+    echo "[FAIL] Apache configuration syntax check failed (Current: invalid | Expected: valid)"
+    exit 1
+  fi
+  if ! systemctl restart httpd >/dev/null 2>&1; then
+    echo "[FAIL] Failed to restart httpd service (Current: restart_failed | Expected: running)"
+    exit 1
+  fi
 
   RESULT=$(get_value)
   if [ "$RESULT" = "loaded" ]; then
-    echo "[REMEDIATED] CIS 6.6 - ModSecurity module status (Current: $RESULT | Expected: loaded)"
+    echo "[REMEDIATED] ModSecurity module status (Current: $RESULT | Expected: loaded)"
     exit 0
   else
-    echo "[FAIL] CIS 6.6 - ModSecurity module status (Current: $RESULT | Expected: loaded)"
+    echo "[FAIL] ModSecurity module status (Current: $RESULT | Expected: loaded)"
     exit 1
   fi
 fi

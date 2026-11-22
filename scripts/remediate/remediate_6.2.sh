@@ -27,10 +27,9 @@ get_value() {
 RESULT=$(get_value)
 
 if [ "$RESULT" = "syslog" ]; then
-  echo "[PASS] CIS 6.2 - ErrorLog syslog configuration already compliant (Current: $RESULT | Expected: syslog)"
+  echo "[PASS] ErrorLog syslog configuration already compliant (Current: $RESULT | Expected: syslog)"
   exit 0
 else
-  echo "Remediating: setting ErrorLog to syslog:local1..." >&2
   shopt -s nullglob
   files=(/etc/httpd/conf/httpd.conf /etc/httpd/conf.d/*.conf)
   for file in "${files[@]}"; do
@@ -50,15 +49,21 @@ else
     printf '\nErrorLog "syslog:local1"\n' >> /etc/httpd/conf/httpd.conf
   fi
 
-  httpd -t 2>&2
-  systemctl restart httpd
+  if ! httpd -t >/dev/null 2>&1; then
+    echo "[FAIL] Apache configuration syntax check failed (Current: invalid | Expected: valid)"
+    exit 1
+  fi
+  if ! systemctl restart httpd >/dev/null 2>&1; then
+    echo "[FAIL] Failed to restart httpd service (Current: restart_failed | Expected: running)"
+    exit 1
+  fi
 
   RESULT=$(get_value)
   if [ "$RESULT" = "syslog" ]; then
-    echo "[REMEDIATED] CIS 6.2 - ErrorLog syslog configuration (Current: $RESULT | Expected: syslog)"
+    echo "[REMEDIATED] ErrorLog syslog configuration (Current: $RESULT | Expected: syslog)"
     exit 0
   else
-    echo "[FAIL] CIS 6.2 - ErrorLog syslog configuration (Current: $RESULT | Expected: syslog)"
+    echo "[FAIL] ErrorLog syslog configuration (Current: $RESULT | Expected: syslog)"
     exit 1
   fi
 fi
