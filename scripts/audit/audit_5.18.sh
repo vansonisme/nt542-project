@@ -14,6 +14,11 @@ get_value() {
     return 0
   fi
 
+  if ! grep -RIEq '^[[:space:]]*Header[[:space:]]+always[[:space:]]+set[[:space:]]+Permissions-Policy[[:space:]].*camera=\(\),[[:space:]]*microphone=\(\),[[:space:]]*geolocation=\(\)' /etc/httpd/conf /etc/httpd/conf.d 2>/dev/null; then
+    echo local_directive_missing
+    return 0
+  fi
+
   response=$(curl -sS -D - -o /dev/null --max-time 10 http://127.0.0.1/ 2>/dev/null) || {
     echo request_failed
     return 0
