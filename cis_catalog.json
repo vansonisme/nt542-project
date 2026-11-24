@@ -1,0 +1,103 @@
+{
+  "2.2": {
+    "name": "Ensure the Log Config Module Is Enabled",
+    "level": 1,
+    "type": "Automated"
+  },
+  "2.4": {
+    "name": "Ensure the Status Module Is Disabled",
+    "level": 1,
+    "type": "Automated"
+  },
+  "2.5": {
+    "name": "Ensure the Autoindex Module Is Disabled",
+    "level": 1,
+    "type": "Automated"
+  },
+  "2.8": {
+    "name": "Ensure the Info Module Is Disabled",
+    "level": 1,
+    "type": "Automated"
+  },
+  "3.2": {
+    "name": "Ensure the Apache User Account Has an Invalid Shell",
+    "level": 1,
+    "type": "Automated"
+  },
+  "3.5": {
+    "name": "Ensure the Group Is Set Correctly on Apache Directories and Files",
+    "level": 1,
+    "type": "Automated"
+  },
+  "3.6": {
+    "name": "Ensure Other Write Access on Apache Directories and Files Is Restricted",
+    "level": 1,
+    "type": "Manual"
+  },
+  "3.11": {
+    "name": "Ensure Group Write Access for the Apache Directories and Files Is Properly Restricted",
+    "level": 1,
+    "type": "Manual"
+  },
+  "4.1": {
+    "name": "Ensure Access to OS Root Directory Is Denied By Default",
+    "level": 1,
+    "type": "Automated"
+  },
+  "5.4": {
+    "name": "Ensure Default HTML Content Is Removed",
+    "level": 1,
+    "type": "Manual"
+  },
+  "5.8": {
+    "name": "Ensure the HTTP TRACE Method Is Disabled",
+    "level": 1,
+    "type": "Automated"
+  },
+  "5.15": {
+    "name": "Ensure the IP Addresses for Listening for Requests Are Specified",
+    "level": 2,
+    "type": "Automated"
+  },
+  "5.17": {
+    "name": "Ensure HTTP Header Referrer-Policy is set appropriately",
+    "level": 2,
+    "type": "Manual"
+  },
+  "5.18": {
+    "name": "Ensure HTTP Header Permissions-Policy is set appropriately",
+    "level": 2,
+    "type": "Manual"
+  },
+  "6.2": {
+    "name": "Ensure a Syslog Facility Is Configured for Error Logging",
+    "level": 2,
+    "type": "Manual"
+  },
+  "6.6": {
+    "name": "Ensure ModSecurity Is Installed and Enabled",
+    "level": 2,
+    "type": "Automated"
+  },
+  "7.1": {
+    "name": "Ensure mod_ssl and/or mod_nss Is Installed",
+    "level": 1,
+    "type": "Automated"
+  },
+  "7.2": {
+    "name": "Ensure a Valid Trusted Certificate Is Installed",
+    "level": 1,
+    "type": "Manual"
+  },
+  "9.4": {
+    "name": "Ensure KeepAliveTimeout is Set to a Value of 15 or Less",
+    "level": 1,
+    "type": "Automated"
+  },
+  "10.4": {
+    "name": "Ensure the LimitRequestBody Directive is Set to 102400 or Less but not 0",
+    "level": 2,
+    "type": "Automated"
+  }
+}
+

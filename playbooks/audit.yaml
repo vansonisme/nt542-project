@@ -8,34 +8,29 @@
     }}
   become: true
   gather_facts: false
-
   vars:
     project_dir: "{{ playbook_dir | dirname }}"
     audit_dir: "{{ project_dir }}/scripts/audit"
-
     all_cis: >-
       {{
         query('fileglob', audit_dir ~ '/audit_*.sh')
         | map('basename')
-        | map('regex_replace', '^audit_(.*)\.sh$', '\1')
+        | map('regex_replace', '^audit_|[.]sh$', '')
         | list
         | community.general.version_sort
       }}
-
     requested_cis: >-
       {{
         (plan[inventory_hostname] | default([]) | map('string') | list)
         if plan is defined
         else ((cis | default('all') | string).split(',') | map('trim') | list)
       }}
-
     cis_ids: >-
       {{
         all_cis
         if ('all' in requested_cis)
         else requested_cis
       }}
-
   pre_tasks:
     - name: Lưu danh sách host của lượt chạy
       ansible.builtin.set_fact:
@@ -43,7 +38,6 @@
       run_once: true
       delegate_to: localhost
       delegate_facts: true
-
     - name: Kiểm tra danh sách CIS
       ansible.builtin.assert:
         that:
@@ -55,7 +49,6 @@
           {{ cis_ids | difference(all_cis) }}.
           Hiện có: {{ all_cis }}
         quiet: true
-
   tasks:
     - name: Chạy các script CIS audit
       ansible.builtin.script: "{{ audit_dir }}/audit_{{ item }}.sh"
@@ -67,7 +60,6 @@
       register: audit_results
       changed_when: false
       failed_when: false
-
     - name: Tạo nội dung báo cáo Audit
       ansible.builtin.set_fact:
         report_text: |
@@ -85,36 +77,42 @@
         all_lines: "{{ audit_results.results | map(attribute='stdout_lines', default=[]) | flatten }}"
         pass_count: "{{ all_lines | select('match', '^\\[PASS\\]') | list | length }}"
         fail_count: "{{ all_lines | select('match', '^\\[FAIL\\]') | list | length }}"
-
     - name: In báo cáo Audit
       ansible.builtin.debug:
         msg: "{{ report_text.rstrip().split('\n') }}"
-
     - name: Tạo CSV rows
+      vars:
+        cis_catalog: "{{ lookup('ansible.builtin.file', project_dir ~ '/cis_catalog.json') | from_json }}"
+        details_pattern: '^(.*?)\s*\(Current:\s*(.*?)\s*\|\s*Expected:\s*(.*?)\)\s*$'
       ansible.builtin.set_fact:
         csv_rows: |
+          {% set rows = namespace(items=[]) %}
           {% for res in audit_results.results %}
+          {% set cis_id = res.item | string %}
+          {% set metadata = cis_catalog.get(cis_id, {}) %}
           {% for line in res.stdout_lines | default([]) if line.startswith(('[PASS]', '[FAIL]')) %}
-          {{ inventory_hostname }},{{ res.item }},{{ line.split(']')[0] | replace('[', '') }},"{{ (line.split('] ', 1) | last) | replace('"', '""') }}"
+          {% set status = line[1:].split(']', 1)[0] %}
+          {% set message = (line.split(']', 1) | last) | trim %}
+          {% set details = (message | regex_findall(details_pattern) | first) | default([message, '', '']) %}
+          {% set fields = [inventory_hostname[:1] | upper ~ inventory_hostname[1:], cis_id, metadata.get('name', ''), metadata.get('level', '') | string, metadata.get('type', ''), status, details[0] | trim, details[1] | trim, details[2] | trim] %}
+          {% set rows.items = rows.items + [fields] %}
           {% endfor %}
           {% endfor %}
-
-
+          {% for fields in rows.items | sort(attribute='3,4') %}
+          {% for field in fields %}"{{ field | string | replace('"', '""') }}"{% if not loop.last %},{% endif %}{% endfor %}{{ '%c' | format(10) -}}
+          {% endfor %}
 - name: Generate Audit Reports
   hosts: localhost
   gather_facts: false
-
   vars:
     report_dir: "{{ playbook_dir | dirname }}/reports"
     run_hosts: "{{ hostvars['localhost']['run_hosts'] | default([]) }}"
-
   tasks:
     - name: Tạo thư mục reports
       ansible.builtin.file:
         path: "{{ report_dir }}"
         state: directory
         mode: '0755'
-
     - name: Lưu báo cáo riêng từng server
       ansible.builtin.copy:
         dest: "{{ report_dir }}/audit_{{ item }}.txt"
@@ -123,12 +121,15 @@
       loop_control:
         label: "{{ item }}"
       when: hostvars[item].report_text is defined
-
     - name: Xuất CSV tổng hợp Audit
       ansible.builtin.copy:
         dest: "{{ report_dir }}/audit_report.csv"
         content: |
-          server,check,status,message
+          Server,CIS ID,CIS Name,LEVEL,TYPE,Status,Message,Current,Expected
           {% for h in run_hosts if hostvars[h].csv_rows is defined and hostvars[h].csv_rows | trim | length > 0 %}
+          {% if not loop.first %}
+          ,,,,,,,,
+          {% endif %}
           {{ hostvars[h].csv_rows | trim }}
           {% endfor %}
+
