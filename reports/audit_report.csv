@@ -1,4 +1,4 @@
-Server,CIS ID,CIS Name,LEVEL,TYPE,Status,Message,Current,Expected
+Server,ID,Name,Level,Type,Status,Message,Current,Expected
 "Loadbalancer","2.2","Ensure the Log Config Module Is Enabled","1","Automated","PASS","log_config_module is loaded","loaded","loaded"
 "Loadbalancer","2.4","Ensure the Status Module Is Disabled","1","Automated","FAIL","status_module is enabled","enabled","disabled"
 "Loadbalancer","2.5","Ensure the Autoindex Module Is Disabled","1","Automated","FAIL","Autoindex module is enabled","Loaded","Disabled"

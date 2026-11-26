@@ -1,4 +1,4 @@
-Server,CIS ID,CIS Name,LEVEL,TYPE,Status,Message,Current,Expected
+Server,ID,Name,Level,Type,Status,Message,Current,Expected
 "Loadbalancer","2.4","Ensure the Status Module Is Disabled","1","Automated","REMEDIATED","status_module disabled and Apache restarted","disabled","disabled"
 "Loadbalancer","2.5","Ensure the Autoindex Module Is Disabled","1","Automated","REMEDIATED","Autoindex module has been disabled","Not loaded","Disabled"
 "Loadbalancer","2.8","Ensure the Info Module Is Disabled","1","Automated","REMEDIATED","info_module disabled and Apache restarted","disabled","disabled"
