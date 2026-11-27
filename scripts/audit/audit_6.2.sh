@@ -27,9 +27,9 @@ get_value() {
 RESULT=$(get_value)
 
 if [ "$RESULT" = "syslog" ]; then
-  echo "[PASS] CIS 6.2 - ErrorLog syslog configuration (Current: $RESULT | Expected: syslog)"
+  echo "[PASS] ErrorLog syslog configuration (Current: $RESULT | Expected: syslog)"
   exit 0
 else
-  echo "[FAIL] CIS 6.2 - ErrorLog syslog configuration (Current: $RESULT | Expected: syslog)"
+  echo "[FAIL] ErrorLog syslog configuration (Current: $RESULT | Expected: syslog)"
   exit 1
 fi

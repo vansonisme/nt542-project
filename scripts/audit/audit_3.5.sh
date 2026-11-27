@@ -9,9 +9,9 @@ get_value() {
 RESULT=$(get_value)
 
 if [ "$RESULT" = "0" ]; then
-  echo "[PASS] CIS 3.5 - Apache files group ownership (Current: $RESULT | Expected: 0)"
+  echo "[PASS] Apache files group ownership (Current: $RESULT | Expected: 0)"
   exit 0
 else
-  echo "[FAIL] CIS 3.5 - Apache files group ownership (Current: $RESULT | Expected: 0)"
+  echo "[FAIL] Apache files group ownership (Current: $RESULT | Expected: 0)"
   exit 1
 fi

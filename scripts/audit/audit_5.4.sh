@@ -16,9 +16,9 @@ get_value() {
 RESULT=$(get_value)
 
 if [[ "$RESULT" == "disabled" || "$RESULT" == "absent" ]]; then
-  echo "[PASS] CIS 5.4 - Default HTML content (welcome.conf) (Current: $RESULT | Expected: disabled or absent)"
+  echo "[PASS] Default HTML content (welcome.conf) (Current: $RESULT | Expected: disabled or absent)"
   exit 0
 else
-  echo "[FAIL] CIS 5.4 - Default HTML content (welcome.conf) (Current: $RESULT | Expected: disabled or absent)"
+  echo "[FAIL] Default HTML content (welcome.conf) (Current: $RESULT | Expected: disabled or absent)"
   exit 1
 fi

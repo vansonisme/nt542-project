@@ -26,9 +26,9 @@ get_value() {
 RESULT=$(get_value)
 
 if [ "$RESULT" = "restricted" ]; then
-  echo "[PASS] CIS 5.15 - Listen directive IP binding (Current: $RESULT | Expected: restricted)"
+  echo "[PASS] Listen directive IP binding (Current: $RESULT | Expected: restricted)"
   exit 0
 else
-  echo "[FAIL] CIS 5.15 - Listen directive IP binding (Current: $RESULT | Expected: restricted)"
+  echo "[FAIL] Listen directive IP binding (Current: $RESULT | Expected: restricted)"
   exit 1
 fi

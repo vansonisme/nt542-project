@@ -19,7 +19,7 @@ get_value() {
     return 0
   fi
 
-  response=$(curl -sS -D - -o /dev/null --max-time 10 http://127.0.0.1/ 2>/dev/null) || {
+  response=$(curl -sS -D - -o /dev/null --max-time 10 http://98.88.255.207/ 2>/dev/null) || {
     echo request_failed
     return 0
   }
